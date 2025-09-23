@@ -208,7 +208,6 @@ export class KioskApplication {
       });
 
       this.videoEngagerClient.on("GenesysMessenger.conversationStarted", async () => {
-        console.log('[berat]', "useGenesysMessengerChat", this.config?.useGenesysMessengerChat)
         this.timeoutManager.extend("call", this.timeouts.call);
       });
 
@@ -250,7 +249,6 @@ export class KioskApplication {
     } catch (error) {
       this.log(`VIDEOCLIENT: Failed to initialize: ${error.message}`);
       this.errorHandler.handleError(ErrorTypes.LIBRARY_LOAD_FAILED, error);
-      throw error;
     }
   }
 

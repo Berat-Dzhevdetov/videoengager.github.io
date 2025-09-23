@@ -116,7 +116,6 @@ export class VideoEngagerClient {
     } catch (error) {
       this.connectionState = 'error';
       this.handleInitError(error);
-      throw error;
     }
   }
 

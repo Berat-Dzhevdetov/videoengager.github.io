@@ -1,0 +1,58 @@
+{
+  "name": "videoenager-client-tests",
+  "version": "1.0.0",
+  "description": "Error message validation testing for VideoEnager Client",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:errors": "jest --testPathPattern=error-validation",
+    "test:report": "jest --testPathPattern=error-validation --reporters=default --reporters=./tests/reporters/error-validation-reporter.js"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "@babel/core": "^7.23.0",
+    "@babel/preset-env": "^7.23.0",
+    "babel-jest": "^29.7.0",
+    "identity-obj-proxy": "^3.0.0"
+  },
+  "babel": {
+    "presets": [
+      [
+        "@babel/preset-env",
+        {
+          "targets": {
+            "node": "current"
+          }
+        }
+      ]
+    ]
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": ["<rootDir>/tests/setup.js"],
+    "moduleNameMapper": {
+      "\\.(css|less|scss)$": "identity-obj-proxy"
+    },
+    "testMatch": [
+      "<rootDir>/tests/**/*.test.js"
+    ],
+    "collectCoverageFrom": [
+      "js/**/*.js",
+      "!js/**/*.test.js",
+      "!js/**/node_modules/**"
+    ],
+    "coverageDirectory": "coverage",
+    "coverageReporters": ["text", "lcov", "html"],
+    "verbose": true,
+    "testTimeout": 10000,
+    "maxWorkers": 1,
+    "globals": {
+      "window": true,
+      "document": true,
+      "navigator": true,
+      "location": true
+    }
+  }
+}

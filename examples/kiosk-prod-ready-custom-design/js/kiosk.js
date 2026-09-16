@@ -11,6 +11,7 @@ import { ConfigManager } from './config-manager.js';
 
 export class KioskApplication {
   constructor() {
+    /** @type {import('../types/ve-window').ClientConfig|null} */
     this.config = null;
     this.videoEngagerClient = null;
     this.errorHandler = new ErrorHandler();
@@ -19,6 +20,7 @@ export class KioskApplication {
     this.currentScreen = "initial";
     this.isInitialized = false;
     this.systemNotificationElement = null;
+    this._preCallMessageHandler = null;
     this.timeouts = {
       call: 1000 * 60 * 3, // 3 minutes
       inactivity: 1000 * 60 * 60, // 1 hour
@@ -147,6 +149,10 @@ export class KioskApplication {
 
     // Message listener for video call events
     // window.addEventListener("message", this.handleMessage.bind(this));
+
+    // Listen for PreCallStarted from VideoEngager iframe
+    this._preCallMessageHandler = this._handlePreCallMessage.bind(this);
+    window.addEventListener("message", this._preCallMessageHandler);
 
     // Activity detection for inactivity timer
     ["click", "touchstart", "mousemove", "keypress"].forEach((event) => {
@@ -720,6 +726,31 @@ export class KioskApplication {
     if (oncallScreen) oncallScreen.style.display = "block";
   }
 
+  hideLoadingScreen() {
+    const oncallScreen = document.getElementById("oncall-screen");
+    if (oncallScreen) oncallScreen.style.display = "none";
+  }
+
+  /**
+   * Handles PreCallStarted postMessage events from the VideoEngager iframe.
+   * Validates the origin against the configured veEnv before acting.
+   * @param {MessageEvent} event
+   */
+  _handlePreCallMessage(event) {
+    const expectedOrigin = `https://${this.config?.videoEngager?.veEnv}`;
+    if (event.origin !== expectedOrigin) return;
+
+    let data = event.data;
+    if (typeof data === "string") {
+      try { data = JSON.parse(data); } catch (_) { return; }
+    }
+    if (data?.__postRobot__?.name === "VideoEngager.event:PreCallStarted") {
+      this.log("CALL: PreCall started - hiding waitroom");
+      this.hideLoadingScreen();
+      this.showVideoScreen();
+    }
+  }
+
   /**
    * Shows the video call screen.
    */
@@ -841,7 +872,10 @@ export class KioskApplication {
       document.removeEventListener(event, this.resetInactivityTimer.bind(this));
     });
 
-    // window.removeEventListener("message", this.handleMessage.bind(this));
+    if (this._preCallMessageHandler) {
+      window.removeEventListener("message", this._preCallMessageHandler);
+      this._preCallMessageHandler = null;
+    }
   }
 }
 

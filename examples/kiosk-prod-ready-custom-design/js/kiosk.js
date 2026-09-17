@@ -1,6 +1,5 @@
 // @ts-check
 /// <reference types="../types/ve-window.d.ts" />
-import { EnvironmentConfig } from "../config/environment.js";
 import { configs, metadata } from '../config/conf.js'; // Use 'production' as the base
 import { VideoEngagerClient } from "./client.js";
 import { ErrorHandler, ErrorTypes } from "./error-handler.js";
@@ -18,9 +17,12 @@ export class KioskApplication {
     this.timeoutManager = new TimeoutManager();
     this.waitroomMediator = new WaitroomEventMediator();
     this.currentScreen = "initial";
+    // Phase state machine: 'idle' → 'waiting' → 'precall' → 'active' → 'idle'
+    this.callPhase = 'idle';
     this.isInitialized = false;
     this.systemNotificationElement = null;
     this._preCallMessageHandler = null;
+    this.wakeLock = null;
     this.timeouts = {
       call: 1000 * 60 * 3, // 3 minutes
       inactivity: 1000 * 60 * 60, // 1 hour
@@ -176,7 +178,7 @@ export class KioskApplication {
       await this.handleCancelCall.bind(this)(detail);
     });
 
-    this.waitroomMediator.on("error", (detail) => {
+    this.waitroomMediator.on("error", () => {
       this.log("WAITROOM: Error in waitroom");
       this.errorHandler.handleError(ErrorTypes.WAITROOM_ERROR);
     });
@@ -210,6 +212,7 @@ export class KioskApplication {
       // Set up event listeners
       this.videoEngagerClient.on("VideoEngagerCall.agentJoined", () => {
         this.log("VIDEOCLIENT: Video call agent joined");
+        this.callPhase = 'active';
         this.handleVideoCallStarted();
       });
 
@@ -271,6 +274,7 @@ export class KioskApplication {
 
     try {
       // Show loading screen
+      this.callPhase = 'waiting';
       this.showScreen("loading");
 
       // Set call timeout
@@ -283,6 +287,7 @@ export class KioskApplication {
         this.timeouts.call
       );
 
+      await this._acquireWakeLock();
       await this.videoEngagerClient?.waitForReady();
       // Start video call
       if (this.videoEngagerClient && this.videoEngagerClient.isReady()) {
@@ -307,6 +312,7 @@ export class KioskApplication {
       }
     } catch (error) {
       this.log(`CALL: Failed to start video call: ${error.message}`);
+      this._releaseWakeLock();
       this.errorHandler.handleError(ErrorTypes.INTERNAL_ERROR, error);
       this.showScreen("initial");
     }
@@ -322,7 +328,9 @@ export class KioskApplication {
     this.log("CALL: Cancel call requested");
 
     // Clear call timeout
+    this.callPhase = 'idle';
     this.timeoutManager.clear("call");
+    this._releaseWakeLock();
 
     // Clear system notification
     this.clearSystemNotification();
@@ -625,7 +633,9 @@ export class KioskApplication {
     this.log("CALL: Video call ended");
 
     // Clear any active timeouts
+    this.callPhase = 'idle';
     this.timeoutManager.clear("call");
+    this._releaseWakeLock();
 
     // Clear system notification
     this.clearSystemNotification();
@@ -659,6 +669,7 @@ export class KioskApplication {
 
   async handleCallTimeout() {
     this.log("CALL: Call timeout - ending call");
+    this._releaseWakeLock();
 
     // End video call
     if (this.videoEngagerClient) {
@@ -746,8 +757,17 @@ export class KioskApplication {
     }
     if (data?.__postRobot__?.name === "VideoEngager.event:PreCallStarted") {
       this.log("CALL: PreCall started - hiding waitroom");
-      this.hideLoadingScreen();
-      this.showVideoScreen();
+      this.callPhase = 'precall';
+      this.showScreen("video");
+    }
+    if (data?.__postRobot__?.name === "VideoEngager.event:PreCallFinished") {
+      this.log(`CALL: PreCall finished - callPhase is '${this.callPhase}'`);
+      if (this.callPhase === 'precall') {
+        // Agent hasn't joined yet — revert to waitroom
+        this.callPhase = 'waiting';
+        this.showScreen("loading");
+      }
+      // If 'active', agent already joined — stay on video screen
     }
   }
 
@@ -756,7 +776,7 @@ export class KioskApplication {
    */
   showVideoScreen() {
     const videoUI = document.getElementById("video-call-ui");
-    if (videoUI) videoUI.style.height = "calc(100% - 38px)"; // Remove 38px for header height
+    if (videoUI) videoUI.style.height = "calc(100dvh - 38px)"; // Remove 38px for header height
   }
 
   // Configuration and Setup
@@ -837,7 +857,7 @@ export class KioskApplication {
   log(message) {
     const timestamp = new Date().toISOString();
     const stackTrace = new Error().stack;
-    const stackTraceLine = stackTrace ? stackTrace.split("\n")[2].trim() : "unknown source";
+    const stackTraceLine = stackTrace ? (stackTrace.split("\n")[2]?.trim() ?? "unknown source") : "unknown source";
     console.log(`[${timestamp}] ${message}`, {
       source: stackTraceLine
     });
@@ -849,6 +869,24 @@ export class KioskApplication {
         debugElement.textContent += `[${timestamp}] ${message}\n`;
         debugElement.scrollTop = debugElement.scrollHeight;
       }
+    }
+  }
+
+  // ── Wake lock ────────────────────────────────────────────────────────────────
+  async _acquireWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    try {
+      this.wakeLock = await navigator.wakeLock.request('screen');
+      this.wakeLock.addEventListener('release', () => { this.wakeLock = null; });
+    } catch (e) {
+      this.log(`WAKELOCK: Could not acquire wake lock: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  _releaseWakeLock() {
+    if (this.wakeLock) {
+      this.wakeLock.release();
+      this.wakeLock = null;
     }
   }
 
@@ -876,6 +914,8 @@ export class KioskApplication {
       window.removeEventListener("message", this._preCallMessageHandler);
       this._preCallMessageHandler = null;
     }
+
+    this._releaseWakeLock();
   }
 }
 

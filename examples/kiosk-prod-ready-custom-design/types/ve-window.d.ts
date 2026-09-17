@@ -40,4 +40,4 @@ interface ClientConfig {
   debug?: boolean; // default: false
 }
 
-export {};
+export { ClientConfig, VideoEngagerConfig, GenesysConfig };
